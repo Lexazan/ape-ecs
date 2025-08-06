@@ -155,6 +155,7 @@ module.exports = class World {
     /* $lab:coverage:on$ */
     reverse.set(entity, count + 1);
     this.refs[target].add([entity, component, prop, sub].join('...'));
+    this._entityUpdated(this.getEntity(entity));
     this._sendChange({
       op: 'addRef',
       component: component,
@@ -182,6 +183,7 @@ module.exports = class World {
     if (this.refs[target].size === 0) {
       delete this.refs[target];
     }
+    this._entityUpdated(this.getEntity(entity));
     this._sendChange({
       op: 'deleteRef',
       component,

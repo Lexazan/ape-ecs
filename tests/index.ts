@@ -1969,3 +1969,585 @@ describe('Regressions', () => {
     expect(e2.has('TestB')).to.be.true;
   });
 });
+
+describe('fromReverse comprehensive tests', () => {
+  let world: World;
+
+  beforeEach(() => {
+    world = new World();
+  });
+
+  describe('EntityRef fromReverse tests', () => {
+    class Room extends Component {
+      static properties = {
+        name: 'unknown'
+      };
+    }
+
+    class Furniture extends Component {
+      static properties = {
+        name: 'item',
+        room: EntityRef
+      };
+    }
+
+    beforeEach(() => {
+      world.registerComponent(Room);
+      world.registerComponent(Furniture);
+    });
+
+    it('should find furniture in specific room using EntityRef', () => {
+      // Create rooms
+      const livingroom = world.createEntity({
+        id: 'livingroom',
+        c: {
+          Room: { name: 'Living Room' }
+        }
+      });
+
+      const bedroom = world.createEntity({
+        id: 'bedroom', 
+        c: {
+          Room: { name: 'Bedroom' }
+        }
+      });
+
+      // Create furniture with room references
+      const sofa = world.createEntity({
+        id: 'sofa',
+        c: {
+          Furniture: { 
+            name: 'Sofa',
+            room: livingroom 
+          }
+        }
+      });
+
+      const table = world.createEntity({
+        id: 'table',
+        c: {
+          Furniture: { 
+            name: 'Table',
+            room: livingroom 
+          }
+        }
+      });
+
+      const bed = world.createEntity({
+        id: 'bed',
+        c: {
+          Furniture: { 
+            name: 'Bed',
+            room: bedroom 
+          }
+        }
+      });
+
+      const window = world.createEntity({
+        id: 'window',
+        c: {
+          Furniture: { 
+            name: 'Window',
+            room: bedroom 
+          }
+        }
+      });
+
+      // Test fromReverse with entity object
+      const livingroomQuery = world.createQuery().fromReverse(livingroom, 'Furniture');
+      const livingroomFurniture = livingroomQuery.execute();
+
+      expect(livingroomFurniture.size).to.equal(2);
+      expect(livingroomFurniture.has(sofa)).to.be.true;
+      expect(livingroomFurniture.has(table)).to.be.true;
+      expect(livingroomFurniture.has(bed)).to.be.false;
+      expect(livingroomFurniture.has(window)).to.be.false;
+
+      // Test fromReverse with entity ID
+      const bedroomQuery = world.createQuery().fromReverse(bedroom.id, 'Furniture');
+      const bedroomFurniture = bedroomQuery.execute();
+
+      expect(bedroomFurniture.size).to.equal(2);
+      expect(bedroomFurniture.has(bed)).to.be.true;
+      expect(bedroomFurniture.has(window)).to.be.true;
+      expect(bedroomFurniture.has(sofa)).to.be.false;
+      expect(bedroomFurniture.has(table)).to.be.false;
+    });
+
+    it('should update persisted queries when EntityRef changes', () => {
+      const livingroom = world.createEntity({
+        c: { Room: { name: 'Living Room' }}
+      });
+
+      const bedroom = world.createEntity({
+        c: { Room: { name: 'Bedroom' }}
+      });
+
+      const table = world.createEntity({
+        c: {
+          Furniture: { 
+            name: 'Table',
+            room: livingroom 
+          }
+        }
+      });
+
+      // Test with persisted query
+      const persistedQuery = world.createQuery().fromReverse(livingroom, 'Furniture').persist();
+      let results = persistedQuery.execute();
+
+      expect(results.size).to.equal(1);
+      expect(results.has(table)).to.be.true;
+
+      // Move table to bedroom - this should update the persisted query
+      table.c.Furniture.room = bedroom;
+      world.tick(); // Update indexes
+
+      results = persistedQuery.execute();
+      expect(results.size).to.equal(0);
+      expect(results.has(table)).to.be.false;
+
+      // Verify bedroom query now finds the table
+      const bedroomQuery = world.createQuery().fromReverse(bedroom, 'Furniture').persist();
+      const bedroomResults = bedroomQuery.execute();
+      expect(bedroomResults.size).to.equal(1);
+      expect(bedroomResults.has(table)).to.be.true;
+    });
+
+    it('should work with component class instead of string', () => {
+      const livingroom = world.createEntity({
+        c: { Room: { name: 'Living Room' }}
+      });
+
+      const sofa = world.createEntity({
+        c: {
+          Furniture: { 
+            name: 'Sofa',
+            room: livingroom 
+          }
+        }
+      });
+
+      // Test with component class
+      const query = world.createQuery().fromReverse(livingroom, Furniture);
+      const results = query.execute();
+
+      expect(results.size).to.equal(1);
+      expect(results.has(sofa)).to.be.true;
+    });
+  });
+
+  describe('EntitySet fromReverse tests', () => {
+    class RoomContent extends Component {
+      static properties = {
+        items: EntitySet
+      };
+    }
+
+    class Item extends Component {
+      static properties = {
+        name: 'item'
+      };
+    }
+
+    beforeEach(() => {
+      world.registerComponent(RoomContent);
+      world.registerComponent(Item);
+    });
+
+    it('should find rooms containing specific items using EntitySet', () => {
+      // Create items
+      const sofa = world.createEntity({
+        id: 'sofa',
+        c: { Item: { name: 'Sofa' }}
+      });
+
+      const table = world.createEntity({
+        id: 'table', 
+        c: { Item: { name: 'Table' }}
+      });
+
+      const bed = world.createEntity({
+        id: 'bed',
+        c: { Item: { name: 'Bed' }}
+      });
+
+      // Create rooms with item sets
+      const livingroom = world.createEntity({
+        id: 'livingroom',
+        c: { RoomContent: {} }
+      });
+      livingroom.c.RoomContent.items.add(sofa);
+      livingroom.c.RoomContent.items.add(table);
+
+      const bedroom = world.createEntity({
+        id: 'bedroom',
+        c: { RoomContent: {} }
+      });
+      bedroom.c.RoomContent.items.add(bed);
+
+      // Test which rooms contain the sofa
+      const sofaQuery = world.createQuery().fromReverse(sofa, 'RoomContent');
+      const sofaRooms = sofaQuery.execute();
+
+      expect(sofaRooms.size).to.equal(1);
+      expect(sofaRooms.has(livingroom)).to.be.true;
+      expect(sofaRooms.has(bedroom)).to.be.false;
+
+      // Test which rooms contain the bed
+      const bedQuery = world.createQuery().fromReverse(bed.id, 'RoomContent');
+      const bedRooms = bedQuery.execute();
+
+      expect(bedRooms.size).to.equal(1);
+      expect(bedRooms.has(bedroom)).to.be.true;
+      expect(bedRooms.has(livingroom)).to.be.false;
+    });
+
+    it('should update persisted queries when EntitySet changes', () => {
+      const table = world.createEntity({
+        c: { Item: { name: 'Table' }}
+      });
+
+      const livingroom = world.createEntity({
+        c: { RoomContent: {} }
+      });
+
+      const bedroom = world.createEntity({
+        c: { RoomContent: {} }
+      });
+
+      // Test with persisted query
+      const tableQuery = world.createQuery().fromReverse(table, 'RoomContent').persist();
+      let tableRooms = tableQuery.execute();
+
+      expect(tableRooms.size).to.equal(0);
+
+      // Add table to livingroom
+      livingroom.c.RoomContent.items.add(table);
+      world.tick(); // Update indexes
+
+      tableRooms = tableQuery.execute();
+      expect(tableRooms.size).to.equal(1);
+      expect(tableRooms.has(livingroom)).to.be.true;
+
+      // Move table to bedroom
+      livingroom.c.RoomContent.items.delete(table);
+      bedroom.c.RoomContent.items.add(table);
+      world.tick(); // Update indexes
+
+      tableRooms = tableQuery.execute();
+      expect(tableRooms.size).to.equal(1);
+      expect(tableRooms.has(bedroom)).to.be.true;
+      expect(tableRooms.has(livingroom)).to.be.false;
+    });
+
+    it('should handle item in multiple EntitySets', () => {
+      const sharedItem = world.createEntity({
+        id: 'plant',
+        c: { Item: { name: 'Plant' }}
+      });
+
+      const livingroom = world.createEntity({
+        c: { RoomContent: {} }
+      });
+
+      const bedroom = world.createEntity({
+        c: { RoomContent: {} }
+      });
+
+      // Add same item to multiple rooms
+      livingroom.c.RoomContent.items.add(sharedItem);
+      bedroom.c.RoomContent.items.add(sharedItem);
+
+      const plantQuery = world.createQuery().fromReverse(sharedItem, 'RoomContent');
+      const plantRooms = plantQuery.execute();
+
+      expect(plantRooms.size).to.equal(2);
+      expect(plantRooms.has(livingroom)).to.be.true;
+      expect(plantRooms.has(bedroom)).to.be.true;
+    });
+  });
+
+  describe('EntityObject fromReverse tests', () => {
+    class Inventory extends Component {
+      static properties = {
+        slots: EntityObject
+      };
+    }
+
+    class Item extends Component {
+      static properties = {
+        name: 'item'
+      };
+    }
+
+    beforeEach(() => {
+      world.registerComponent(Inventory);
+      world.registerComponent(Item);
+    });
+
+    it('should find inventories containing specific items using EntityObject', () => {
+      // Create items
+      const sword = world.createEntity({
+        id: 'sword',
+        c: { Item: { name: 'Sword' }}
+      });
+
+      const shield = world.createEntity({
+        id: 'shield',
+        c: { Item: { name: 'Shield' }}
+      });
+
+      const potion = world.createEntity({
+        id: 'potion', 
+        c: { Item: { name: 'Potion' }}
+      });
+
+      const bow = world.createEntity({
+        id: 'bow',
+        c: { Item: { name: 'Bow' }}
+      });
+
+      // Create characters with inventories
+      const warrior = world.createEntity({
+        id: 'warrior',
+        c: { Inventory: {} }
+      });
+      warrior.c.Inventory.slots['weapon'] = sword;
+      warrior.c.Inventory.slots['shield'] = shield;
+
+      const archer = world.createEntity({
+        id: 'archer',
+        c: { Inventory: {} }
+      });
+      archer.c.Inventory.slots['weapon'] = bow;
+      archer.c.Inventory.slots['consumable'] = potion;
+
+      // Test which inventories contain the sword
+      const swordQuery = world.createQuery().fromReverse(sword, 'Inventory');
+      const swordInventories = swordQuery.execute();
+
+      expect(swordInventories.size).to.equal(1);
+      expect(swordInventories.has(warrior)).to.be.true;
+      expect(swordInventories.has(archer)).to.be.false;
+
+      // Test which inventories contain the potion
+      const potionQuery = world.createQuery().fromReverse(potion.id, 'Inventory');
+      const potionInventories = potionQuery.execute();
+
+      expect(potionInventories.size).to.equal(1);
+      expect(potionInventories.has(archer)).to.be.true;
+      expect(potionInventories.has(warrior)).to.be.false;
+    });
+
+    it('should update persisted queries when EntityObject changes', () => {
+      const bow = world.createEntity({
+        c: { Item: { name: 'Bow' }}
+      });
+
+      const warrior = world.createEntity({
+        c: { Inventory: {} }
+      });
+
+      const archer = world.createEntity({
+        c: { Inventory: {} }
+      });
+
+      // Initially bow is with archer
+      archer.c.Inventory.slots['weapon'] = bow;
+
+      // Test with persisted query
+      const bowQuery = world.createQuery().fromReverse(bow, 'Inventory').persist();
+      let bowInventories = bowQuery.execute();
+
+      expect(bowInventories.size).to.equal(1);
+      expect(bowInventories.has(archer)).to.be.true;
+
+      // Move bow to warrior
+      delete archer.c.Inventory.slots['weapon'];
+      warrior.c.Inventory.slots['ranged'] = bow;
+      world.tick(); // Update indexes
+
+      bowInventories = bowQuery.execute();
+      expect(bowInventories.size).to.equal(1);
+      expect(bowInventories.has(warrior)).to.be.true;
+      expect(bowInventories.has(archer)).to.be.false;
+    });
+
+    it('should handle null/undefined values in EntityObject', () => {
+      const sword = world.createEntity({
+        id: 'sword',
+        c: { Item: { name: 'Sword' }}
+      });
+
+      const character = world.createEntity({
+        id: 'character',
+        c: { Inventory: {} }
+      });
+
+      // Test with item not in any slot
+      const query = world.createQuery().fromReverse(sword, 'Inventory');
+      let results = query.execute();
+      expect(results.size).to.equal(0);
+
+      // Add item to slot
+      character.c.Inventory.slots['weapon'] = sword;
+      world.tick();
+
+      results = query.refresh().execute(); // Need refresh for non-persisted queries
+      expect(results.size).to.equal(1);
+      expect(results.has(character)).to.be.true;
+
+      // Set slot to null
+      character.c.Inventory.slots['weapon'] = null;
+      world.tick();
+
+      results = query.refresh().execute(); // Need refresh for non-persisted queries
+      expect(results.size).to.equal(0);
+    });
+
+    it('should handle item in multiple EntityObject slots', () => {
+      const magicRing = world.createEntity({
+        id: 'magic_ring',
+        c: { Item: { name: 'Magic Ring' }}
+      });
+
+      const warrior = world.createEntity({
+        c: { Inventory: {} }
+      });
+
+      const archer = world.createEntity({
+        c: { Inventory: {} }
+      });
+
+      // Same item in different inventories
+      warrior.c.Inventory.slots['ring1'] = magicRing;
+      archer.c.Inventory.slots['ring1'] = magicRing;
+
+      const ringQuery = world.createQuery().fromReverse(magicRing, 'Inventory');
+      const ringInventories = ringQuery.execute();
+
+      expect(ringInventories.size).to.equal(2);
+      expect(ringInventories.has(warrior)).to.be.true;
+      expect(ringInventories.has(archer)).to.be.true;
+    });
+  });
+
+  describe('fromReverse edge cases and pitfalls', () => {
+    class TestRef extends Component {
+      static properties = {
+        target: EntityRef
+      };
+    }
+
+    beforeEach(() => {
+      world.registerComponent(TestRef);
+    });
+
+    it('should handle entity destruction properly', () => {
+      const target = world.createEntity({ id: 'target' });
+      const referrer = world.createEntity({
+        id: 'referrer',
+        c: { TestRef: { target: target }}
+      });
+
+      const query = world.createQuery().fromReverse(target, 'TestRef').persist();
+      let results = query.execute();
+      
+      expect(results.size).to.equal(1);
+      expect(results.has(referrer)).to.be.true;
+
+      // Destroy the referrer
+      referrer.destroy();
+      world.tick();
+
+      results = query.execute();
+      expect(results.size).to.equal(0);
+    });
+
+    it('should handle target entity destruction', () => {
+      const target = world.createEntity({ id: 'target' });
+      const referrer = world.createEntity({
+        id: 'referrer',
+        c: { TestRef: { target: target }}
+      });
+
+      const query = world.createQuery().fromReverse(target, 'TestRef').persist();
+      
+      // Destroy the target entity
+      target.destroy();
+      world.tick();
+
+      // Query should still work but return no results
+      const results = query.execute();
+      expect(results.size).to.equal(0);
+    });
+
+    it('should work with entity created via init object', () => {
+      const target = world.createEntity({ id: 'target' });
+      const referrer = world.createEntity({
+        id: 'referrer',
+        c: { TestRef: { target: target }}
+      });
+
+      // Test with init object syntax
+      const query = world.createQuery({
+        reverse: {
+          entity: target,
+          type: 'TestRef'
+        },
+        persist: true
+      });
+
+      const results = query.execute();
+      expect(results.size).to.equal(1);
+      expect(results.has(referrer)).to.be.true;
+    });
+
+    it('non-persisted queries require manual refresh after changes', () => {
+      const target = world.createEntity({});
+      const referrer = world.createEntity({
+        c: { TestRef: { target: target }}
+      });
+
+      const query = world.createQuery().fromReverse(target, 'TestRef');
+      
+      // Initial query works
+      let results = query.execute();
+      expect(results.size).to.equal(1);
+
+      // Remove the reference
+      referrer.c.TestRef.target = null;
+      world.tick();
+
+      // Non-persisted query still returns old results without refresh
+      results = query.execute();
+      expect(results.size).to.equal(1);
+
+      // But refresh gives correct results
+      results = query.refresh().execute();
+      expect(results.size).to.equal(0);
+    });
+
+    it('persisted queries automatically update after world.tick()', () => {
+      const target = world.createEntity({});
+      const referrer = world.createEntity({
+        c: { TestRef: { target: target }}
+      });
+
+      const query = world.createQuery().fromReverse(target, 'TestRef').persist();
+      
+      // Initial query works
+      let results = query.execute();
+      expect(results.size).to.equal(1);
+
+      // Remove the reference
+      referrer.c.TestRef.target = null;
+      world.tick();
+
+      // Persisted query automatically updates
+      results = query.execute();
+      expect(results.size).to.equal(0);
+    });
+  });
+});

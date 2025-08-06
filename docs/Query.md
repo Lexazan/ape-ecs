@@ -107,26 +107,244 @@ const query = world.createQuery({
 
 ## fromReverse
 
-Query `execute` results must include entities that have Components that reference a given entity with a given Component type.
+Query `execute` results must include entities that have Components that reference a given entity with a given Component type. This is the inverse of normal queries - instead of finding entities with certain components, it finds entities whose components **reference** a specific target entity.
 
 **Arguments**:
-* entity: `Entity`, _required_, Entity instance that must be refered to by a Component.
-* type: `String`, _required_, Component type that contains the reference to the entity.
+* entity: `Entity|String`, _required_, Entity instance or entity ID that must be referenced by a Component.
+* type: `String|Component class`, _required_, Component type name or class that contains the reference to the entity.
 
 **Returns**:
 * `Query` instance for chaining methods.
 
+### Basic Usage
+
 ```js
-// get all of the entities that have a component indicating that they're in the player's inventory
+// Find all entities that have a component indicating that they're in the player's inventory
 const entities = world.createQuery().fromReverse(player, 'InInventory').execute();
 ```
+
 ```js
+// Using init object syntax
 const query = world.createQuery({
   reverse: {
     entity: player,
     type: 'InInventory'
   }
 });
+```
+
+### EntityRef Examples
+
+Works with EntityRef properties to find entities that reference a target entity:
+
+```js
+class Room extends ApeECS.Component {
+  static properties = { name: 'unknown' };
+}
+
+class Furniture extends ApeECS.Component {
+  static properties = {
+    name: 'item',
+    room: EntityRef  // Reference to a Room entity
+  };
+}
+
+world.registerComponent(Room);
+world.registerComponent(Furniture);
+
+const livingroom = world.createEntity({
+  c: { Room: { name: 'Living Room' }}
+});
+
+const sofa = world.createEntity({
+  c: { Furniture: { name: 'Sofa', room: livingroom }}
+});
+
+const table = world.createEntity({
+  c: { Furniture: { name: 'Table', room: livingroom }}
+});
+
+// Find all furniture in the living room
+const livingroomFurniture = world.createQuery()
+  .fromReverse(livingroom, 'Furniture')
+  .execute();
+// Returns: Set containing sofa and table entities
+
+// Can also use entity ID and component class
+const query2 = world.createQuery()
+  .fromReverse(livingroom.id, Furniture);
+```
+
+### EntitySet Examples
+
+Works with EntitySet properties to find entities whose sets contain a target entity:
+
+```js
+class RoomContent extends ApeECS.Component {
+  static properties = {
+    items: EntitySet  // Set of item entities
+  };
+}
+
+class Item extends ApeECS.Component {
+  static properties = { name: 'item' };
+}
+
+const sword = world.createEntity({
+  c: { Item: { name: 'Sword' }}
+});
+
+const armory = world.createEntity({
+  c: { RoomContent: {} }
+});
+
+const treasury = world.createEntity({
+  c: { RoomContent: {} }
+});
+
+// Add sword to armory
+armory.c.RoomContent.items.add(sword);
+
+// Find all rooms containing the sword
+const roomsWithSword = world.createQuery()
+  .fromReverse(sword, 'RoomContent')
+  .execute();
+// Returns: Set containing armory entity
+
+// Sword can be in multiple rooms
+treasury.c.RoomContent.items.add(sword);
+const allRoomsWithSword = world.createQuery()
+  .fromReverse(sword, 'RoomContent')
+  .execute();
+// Returns: Set containing both armory and treasury entities
+```
+
+### EntityObject Examples
+
+Works with EntityObject properties to find entities whose objects contain a target entity:
+
+```js
+class Inventory extends ApeECS.Component {
+  static properties = {
+    slots: EntityObject  // Object with entity references as values
+  };
+}
+
+class Item extends ApeECS.Component {
+  static properties = { name: 'item' };
+}
+
+const sword = world.createEntity({
+  c: { Item: { name: 'Magic Sword' }}
+});
+
+const warrior = world.createEntity({
+  c: { Inventory: {} }
+});
+
+const archer = world.createEntity({
+  c: { Inventory: {} }
+});
+
+// Assign sword to warrior's weapon slot
+warrior.c.Inventory.slots['weapon'] = sword;
+
+// Find all inventories containing the sword
+const inventoriesWithSword = world.createQuery()
+  .fromReverse(sword, 'Inventory')
+  .execute();
+// Returns: Set containing warrior entity
+
+// Move sword to archer
+delete warrior.c.Inventory.slots['weapon'];
+archer.c.Inventory.slots['primary'] = sword;
+
+// Same item can be in multiple inventories/slots
+warrior.c.Inventory.slots['backup'] = sword;
+const allInventoriesWithSword = world.createQuery()
+  .fromReverse(sword, 'Inventory')
+  .execute();
+// Returns: Set containing both warrior and archer entities
+```
+
+### Persisted Queries and Updates
+
+**Important**: fromReverse queries automatically update when references change, but behavior differs between persisted and non-persisted queries:
+
+```js
+const target = world.createEntity();
+const referrer = world.createEntity({
+  c: { TestRef: { target: target }}
+});
+
+// Persisted query automatically updates after world.tick()
+const persistedQuery = world.createQuery()
+  .fromReverse(target, 'TestRef')
+  .persist();
+
+let results = persistedQuery.execute();
+console.log(results.size); // 1
+
+// Change reference
+referrer.c.TestRef.target = null;
+world.tick(); // Important: call tick to update indexes
+
+results = persistedQuery.execute();
+console.log(results.size); // 0 - automatically updated
+
+// Non-persisted query requires manual refresh
+const nonPersistedQuery = world.createQuery()
+  .fromReverse(target, 'TestRef');
+
+referrer.c.TestRef.target = target; // Re-add reference
+world.tick();
+
+results = nonPersistedQuery.execute();
+console.log(results.size); // Still 0 - stale results
+
+results = nonPersistedQuery.refresh().execute();
+console.log(results.size); // 1 - fresh results after refresh
+```
+
+### Performance Considerations
+
+- **Persisted queries**: Automatically updated and indexed. Best for queries used frequently or in systems.
+- **Non-persisted queries**: Must be manually refreshed. Best for one-off queries.
+- **Reference updates**: All reference changes (EntityRef, EntitySet, EntityObject) trigger index updates for persisted queries.
+
+### Common Pitfalls
+
+⚠️ **Pitfall 1: Non-persisted queries don't auto-update**
+
+```js
+const query = world.createQuery().fromReverse(target, 'ComponentType');
+// Change references...
+world.tick();
+const results = query.execute(); // ❌ Stale results!
+const freshResults = query.refresh().execute(); // ✅ Fresh results
+```
+
+⚠️ **Pitfall 2: Forgetting to call world.tick()**
+
+```js
+const query = world.createQuery().fromReverse(target, 'ComponentType').persist();
+entity.c.ComponentType.ref = newTarget;
+const results = query.execute(); // ❌ Still shows old results
+world.tick(); // ✅ Must call tick to update indexes
+const updatedResults = query.execute(); // ✅ Now shows correct results
+```
+
+⚠️ **Pitfall 3: Entity destruction edge cases**
+
+```js
+// Target entity destroyed - query still works but returns empty results
+target.destroy();
+const results = query.execute(); // Returns empty Set (not error)
+
+// Referrer entity destroyed - automatically removed from query results
+referrer.destroy();
+world.tick();
+const results2 = query.execute(); // Automatically excludes destroyed entity
 ```
 
 ## from

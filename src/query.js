@@ -154,19 +154,11 @@ class Query {
         // istanbul ignore else
         if (
           this.world.entityReverse.hasOwnProperty(source.entity.id) &&
-          this.world.entityReverse[source.entity.id].hasOwnProperty(source.type)
+          this.world.entityReverse[source.entity.id].hasOwnProperty(source.type) &&
+          this.world.entityReverse[source.entity.id][source.type].has(entity.id)
         ) {
-          const keys = new Set(
-            this.world.entityReverse[source.entity.id][source.type].keys()
-          );
-          if (
-            new Set(
-              this.world.entityReverse[source.entity.id][source.type].keys()
-            ).has(entity.id)
-          ) {
-            inFrom = true;
-            break;
-          }
+          inFrom = true;
+          break;
         }
       }
     }
